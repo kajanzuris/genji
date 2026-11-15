@@ -1,0 +1,48 @@
+name: Render Video MP4
+
+on:
+  # Bisa dijalankan manual lewat tombol "Run workflow" di tab Actions
+  workflow_dispatch:
+  # Otomatis jalan setiap kali Anda mengunggah/mengubah index.html atau narasi.mp3
+  push:
+    branches: [ main, master ]
+    paths:
+      - 'index.html'
+      - 'render.mjs'
+      - 'narasi.mp3'
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: 1. Ambil kode dari repository
+        uses: actions/checkout@v4
+
+      - name: 2. Pasang Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: 3. Pasang FFmpeg di Ubuntu
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg
+
+      - name: 4. Pasang Playwright & Browser Chromium
+        run: |
+          npm install
+          npx playwright install --with-deps chromium
+
+      - name: 5. Jalankan proses Render Frame & Gabung Audio
+        run: node render.mjs
+
+      - name: 6. Unggah Hasil Video MP4 sebagai Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hasil-video-mp4
+          path: |
+            video.mp4
+            sfx.wav
+          retention-days: 7
