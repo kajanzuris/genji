@@ -1,0 +1,167 @@
+<!DOCTYPE html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Berani Mulai Jualan</title>
+<style>
+html,body{margin:0;height:100%;background:#14152a;overflow:hidden;font-family:"Arial Black",Impact,sans-serif}
+#st{position:absolute;overflow:hidden;background:#2b2d42}
+#st canvas{position:absolute;left:0;top:0}
+#lb{position:absolute;left:6%;width:88%;top:55%;height:7%;display:flex;justify-content:center;align-items:center;pointer-events:none}
+#lb span{display:inline-block;padding:.2em .6em;background:#ffd93d;color:#2b2d42;border:.2em solid #2b2d42;box-shadow:.25em .25em 0 #2b2d42;font-size:3.4em;white-space:nowrap;max-width:100%;box-sizing:border-box}
+#sb{position:absolute;left:6%;width:88%;top:82%;height:18%;font-size:4.2em;line-height:1.15;text-align:center;color:#fff;-webkit-text-stroke:.16em #2b2d42;paint-order:stroke fill;overflow:hidden;pointer-events:none}
+#sb .hl{color:#ffd93d}
+#ct{position:fixed;top:0;left:0;right:0;z-index:9;display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding:6px;background:#000a;color:#fff;font:12px sans-serif}
+#ct input[type=range]{flex:1;min-width:80px}
+</style></head><body>
+<div id="st"><canvas id="cv"></canvas><div id="lb"><span></span></div><div id="sb"></div></div>
+<div id="ct"><label>Pilih audio narasi <input type="file" id="fi" accept="audio/*"></label><button id="bp">Putar</button><button id="bj">Jeda</button><input type="range" id="rg" min="0" max="1000" value="0"><label><input type="checkbox" id="sx" checked> SFX</label><span id="inf"></span></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/*JS*/
+const AUDIO_OFFSET=0,FPS=30; // detik; positif = audio tertunda
+// ===== DATA CAPTIONS (SRT per frasa; waktu per kata dibagi proporsional jumlah huruf) =====
+const SRT=[[0,1.027,"Tahu nggak sih,"],[1.027,5.393,"menurut aku delapan puluh persen orang itu sudah gagal jualan bahkan"],[5.393,9.116,"sebelum mereka berani posting foto produk yang pertama."],[9.116,13.418,"Masalahnya kita sering banget terjebak urusan ribet kayak logo yang"],[13.418,15.729,"estetik atau mikirin kemasan mahal,"],[15.729,18.425,"padahal isi dompet masih nol besar lho."],[18.425,21.635,"Padahal ya, inti jualan itu simpel banget kok."],[21.635,24.909,"Cuma soal kasih solusi ke orang yang memang butuh,"],[24.909,29.146,"ibaratnya kayak kamu nyodorin payung pas lagi gerimis gitu deh."],[29.146,30.495,"Contoh nyatanya nih,"],[30.495,34.796,"coba deh kamu tawarin sambal bawang botolan buatan sendiri ke teman"],[34.796,36.658,"kantor yang bekalnya hambar,"],[36.658,39.611,"itu saja sudah sah disebut mulai bisnis ya."],[39.911,44.160,"Percaya deh, rasa malu nggak bakal bisa bikin perut kenyang,"],[44.160,47.312,"tapi kalau notifikasi transferan sudah masuk,"],[47.312,50.602,"pasti bikin kamu ketagihan buat jualan terus."]];
+const WORDS=[];SRT.forEach(([s,e,tx],li)=>{const ws=tx.split(/\s+/),tot=ws.reduce((a,w)=>a+w.length,0);let c=s;ws.forEach((w,wi)=>{const d=(e-s)*w.length/tot;WORDS.push({w,s:c,e:c+d,l:li+1,i:wi});c+=d})});
+const LW={};WORDS.forEach(x=>(LW[x.l]=LW[x.l]||[]).push(x));
+const W=(l,i)=>LW[l][i].s;
+const LASTS=WORDS[WORDS.length-1].s,END=WORDS[WORDS.length-1].e+1;window.DURATION=END;
+const B=[0,3,6,9,13].map(i=>SRT[i][0]);
+const cl=x=>Math.max(0,Math.min(1,x)),L=(a,b,k)=>a+(b-a)*k,ease=x=>1-Math.pow(1-cl(x),3);
+const eb=x=>{x=cl(x);const c=1.70158;return 1+(c+1)*Math.pow(x-1,3)+c*Math.pow(x-1,2)};
+const bi=t=>{let i=0;B.forEach((b,k)=>{if(t>=b)i=k});return i};
+// ===== THREE =====
+const cv=document.getElementById('cv'),st=document.getElementById('st');
+const R=new THREE.WebGLRenderer({antialias:true,preserveDrawingBuffer:true,canvas:cv});
+R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;
+const sc=new THREE.Scene();sc.background=new THREE.Color(0x2b2d42);
+const cam=new THREE.PerspectiveCamera(38,9/16,.1,200);
+const amb=new THREE.AmbientLight(0xffffff,.55),dl=new THREE.DirectionalLight(0xffffff,1);
+dl.castShadow=true;dl.shadow.mapSize.set(1024,1024);const sh=dl.shadow.camera;sh.left=-12;sh.right=12;sh.top=12;sh.bottom=-12;sh.far=60;
+sc.add(amb,dl,dl.target);
+const gm=new THREE.DataTexture(new Uint8Array([120,255]),2,1,THREE.LuminanceFormat);gm.minFilter=gm.magFilter=THREE.NearestFilter;gm.needsUpdate=true;
+const OL=new THREE.MeshBasicMaterial({color:0x2b2d42,side:THREE.BackSide});
+const tn=c=>new THREE.MeshToonMaterial({color:c,gradientMap:gm});
+function mk(geo,col,p,r){const m=new THREE.Mesh(geo,tn(col));m.castShadow=m.receiveShadow=true;const o=new THREE.Mesh(geo,OL);o.scale.setScalar(1.06);m.add(o);if(p)m.position.set(p[0],p[1],p[2]);if(r!==undefined)m.rotation.z=r;return m}
+const Bx=(w,h,d)=>new THREE.BoxGeometry(w,h,d),Cy=(a,b,h,s)=>new THREE.CylinderGeometry(a,b,h,s||20);
+const disc=(r,h)=>{const g=Cy(r,r,h,20);g.rotateX(Math.PI/2);return g};
+const parts=[];
+function part(i,x,y,z,kids,o){const g=new THREE.Group();g.position.set(40*i+x,y,z);kids.forEach(k=>g.add(k));g.userData=Object.assign({i,d:0,a:.12,f:1.6,ph:0,s:1,y},o||{});g.scale.setScalar(.001);sc.add(g);parts.push(g);return g}
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(120,40),tn(0xffffff));floor.rotation.x=-Math.PI/2;floor.position.y=-3.3;floor.receiveShadow=true;sc.add(floor);
+// beat 1: HP retak
+const scr1=mk(Bx(2.9,5.7,.1),0x2b2d42,[0,0,.28]);
+const P1=part(0,0,0,0,[mk(Bx(3.4,6.4,.5),0xff6b6b),scr1,mk(Bx(2.2,1.2,.1),0xffd93d,[0,1.6,.36]),mk(disc(.5,.1),0x4d96ff,[-.8,-.3,.36]),mk(Bx(1.2,.3,.1),0xffffff,[.6,-.3,.36]),mk(Bx(2.2,.3,.1),0x6b6f93,[0,-1.2,.36]),mk(Bx(2.6,.07,.03),0xffffff,[.2,.9,.4],.9),mk(Bx(1.8,.07,.03),0xffffff,[-.5,-1.6,.4],-.6),mk(Bx(1.2,.07,.03),0xffffff,[.7,-.9,.4],.3)],{a:.25,f:1.3});
+P1.rotation.x=-.1;
+// beat 2: meja + sketsa
+part(1,0,-2.4,0,[mk(Bx(11,1.8,6),0xb8794a)],{a:0});
+for(let k=0;k<6;k++){const sh2=mk(Bx(2.8,.06,3.6),0xffffff),kids=[sh2];if(k%2==0)kids.push(mk(disc(.45,.04),0x4d96ff,[.3,.07,0]));kids[kids.length-1].rotation.x=Math.PI/2*(k%2==0?1:0);
+ const p=part(1,((k*7)%5-2)*1.1,-1.45+k*.07,((k*3)%4-1.5)*.7,kids,{d:.15*(k+1),a:.03,f:2+k*.3,ph:k});p.rotation.y=((k*37)%10-5)*.12}
+part(1,3.6,-1.2,1.4,[mk(Cy(.14,.14,3.2,10),0xffd93d,[0,0,0],0)],{d:1,a:.06}).rotation.z=Math.PI/2.3;
+// beat 3: payung + hujan
+const dome=mk(new THREE.SphereGeometry(3.4,24,10,0,Math.PI*2,0,Math.PI/2),0xffd93d,[0,1.2,0]);dome.material.side=THREE.DoubleSide;
+part(2,0,0,0,[dome,mk(Cy(.12,.12,4.6,10),0x2b2d42,[0,-1.1,0]),mk(new THREE.TorusGeometry(.45,.12,8,14,Math.PI),0x2b2d42,[.45,-3.3,0],Math.PI),mk(new THREE.SphereGeometry(.2,10,8),0x2b2d42,[0,4.6,0])],{a:.2,f:1.2,d:.1});
+part(2,0,-3.2,0,[mk(Cy(4,4,.06,28),0x4d96ff,[0,0,0])],{a:0,d:.3});
+const drops=[];for(let k=0;k<34;k++){const m=new THREE.Mesh(Bx(.07,.8,.07),new THREE.MeshBasicMaterial({color:0x4d96ff}));sc.add(m);drops.push(m)}
+// beat 4: botol sambal
+const jar=part(3,0,0,0,[mk(Cy(1.7,1.7,3.6,24),0xffffff,[0,0,0]),mk(Cy(1.5,1.5,2.6,24),0xff6b6b,[0,-.4,0]),mk(Cy(1.8,1.8,.6,24),0xffd93d,[0,2.1,0]),mk(Bx(2.2,1.3,.08),0xffffff,[0,-.2,1.72]),mk(Bx(1.5,.14,.04),0x2b2d42,[0,0,1.78]),mk(Bx(1,.14,.04),0x2b2d42,[0,-.35,1.78])],{a:.2,f:1.1});
+const gar=[0,1,2,3,4].map(k=>part(3,0,0,0,[mk(new THREE.SphereGeometry(.28,10,8),0xffffff)],{d:.2*k+.3,a:.3,f:1.7,ph:k}));
+// beat 5: transfer masuk
+const scr5=mk(Bx(2.9,5.7,.1),0x4d96ff,[0,0,.28]);
+const chk=new THREE.Group();chk.add(mk(Bx(1.4,.38,.1),0xffffff,[-.35,-.25,.36],-.8),mk(Bx(2.2,.38,.1),0xffffff,[.5,.1,.36],.8));
+const P5=part(4,0,0,0,[mk(Bx(3.4,6.4,.5),0x2b2d42),scr5,chk],{a:.2,f:1.4});
+const coins=[0,1,2,3,4,5].map(k=>part(4,Math.cos(k*1.05+.4)*3.3,.5+(k%3)*1.4,1,[mk(disc(.5,.14),0xffd93d)],{at:W(15,3)-.06+k*.12,a:.25,f:2+k*.2,ph:k}));
+const face=part(4,0,8.6,0,[mk(new THREE.SphereGeometry(1.8,20,14),0xffd93d),mk(new THREE.SphereGeometry(.2,8,6),0x2b2d42,[-.65,.4,1.6]),mk(new THREE.SphereGeometry(.2,8,6),0x2b2d42,[.65,.4,1.6])],{at:44.2,a:.2,f:1.2});
+const smile=mk(new THREE.TorusGeometry(.8,.11,8,16,Math.PI),0x2b2d42,[0,.05,1.7],Math.PI);face.add(smile);
+// latar dinamis
+const BGS=[],ACS=[0xff6b6b,0x4d96ff,0xffd93d,0xff6b6b,0x6bcb77];
+for(let k=0;k<10;k++){const m=new THREE.Mesh(new THREE.IcosahedronGeometry(1.2+k%3*.5,0),tn(0xffffff));sc.add(m);BGS.push(m)}
+const DUST=[];for(let k=0;k<16;k++){const m=new THREE.Mesh(new THREE.SphereGeometry(.1,6,5),new THREE.MeshBasicMaterial({color:0xffffff}));sc.add(m);DUST.push(m)}
+const BG=[0x2b2d42,0xcfe3ff,0x2b2d42,0xffe6a0,0xbff0c8],LC=[0xff9a6b,0xfff2d6,0xffffff,0xffc27a,0xffffff],LI=[.7,1,1.3,1,1.2],LP=[[6,12,8],[8,10,6],[1,14,4],[-5,9,9],[5,12,9]];
+const tmp=new THREE.Color(),tmp2=new THREE.Color();
+const lc=(a,i,pe)=>{tmp.set(a[i]);if(pe>0)tmp.lerp(tmp2.set(a[i+1]),pe);return tmp};
+function camRel(i,t){const u=cl((t-B[i])/((B[i+1]||END)-B[i]));
+ if(i==0)return[0,.5,L(18,10.5,ease(t/1.4))+u*.4,0];
+ if(i==1)return[L(-5,5,u),6,24,.5];
+ if(i==2)return[0,5,26,2];
+ if(i==3){const a=L(-.6,.6,u);return[Math.sin(a)*13,3,Math.cos(a)*13,0]}
+ return[0,L(2,5,ease((t-44)/6.5)),L(16,12,ease((t-B[4])/.6)),L(0,8.5,ease((t-44.2)/(LASTS-44.2)))]}
+function update(t){
+ const i=bi(t);let pe=0;if(i<4){const ps=B[i+1]-.55;if(t>ps)pe=ease((t-ps)/.5)}
+ const cx=i<4?L(40*i,40*(i+1),pe):160,r0=camRel(i,t),r1=i<4?camRel(i+1,B[i+1]):r0;
+ cam.position.set(cx+L(r0[0],r1[0],pe),L(r0[1],r1[1],pe),L(r0[2],r1[2],pe));cam.lookAt(cx,L(r0[3],r1[3],pe),0);
+ sc.background.copy(lc(BG,i,pe));floor.material.color.copy(sc.background).multiplyScalar(.82);floor.position.x=cx;
+ dl.color.copy(lc(LC,i,pe));const j=i<4?i+1:i;dl.intensity=L(LI[i],LI[j],pe);
+ dl.position.set(cx+L(LP[i][0],LP[j][0],pe),L(LP[i][1],LP[j][1],pe),L(LP[i][2],LP[j][2],pe));dl.target.position.set(cx,0,0);
+ parts.forEach(g=>{const u=g.userData,s0=u.at!==undefined?u.at:B[u.i]-.1+u.d,s=eb((t-s0)/.45)*u.s;g.scale.setScalar(Math.max(s,.001));g.position.y=u.y+Math.sin(t*u.f+u.ph)*u.a;g.visible=s>.002});
+ const ti=W(2,2)-.06,wb=t>ti?Math.exp(-(t-ti)*5)*Math.sin((t-ti)*40)*.12:0;P1.rotation.z=Math.sin(t*.9)*.04+wb;
+ dome.scale.y=.12+.88*eb((t-(W(9,4)-.06))/.5);
+ for(let k=0;k<34;k++){const d=drops[k],sg=k%2?1:-1;d.position.set(80+sg*(3.5+(k*.37%1)*3.5),8-((t*9+k*1.7)%13),((k*5)%7)-3)}
+ jar.rotation.y=Math.sin(t*.6)*.3;
+ gar.forEach((g,k)=>{const a=t*.8+k*1.26;g.position.x=120+Math.cos(a)*2.7;g.position.z=Math.sin(a)*2.7});
+ const tr=t>=W(15,2)-.06;scr5.material.color.set(tr?0x6bcb77:0x4d96ff);chk.scale.setScalar(Math.max(.001,eb((t-(W(15,2)-.06))/.4)));P5.rotation.z=Math.sin(t*.8)*.04;
+ smile.scale.setScalar(Math.max(.001,eb((t-(LASTS-.06))/.4)));
+ BGS.forEach((m,k)=>{m.position.set(cx+((k*7)%13-6)*2.2+Math.sin(t*.3+k)*1.2,3+(k*5%7)*1.6+Math.cos(t*.25+k)*.8,-9-k%3*3);m.rotation.set(t*.2*(k%3+1),t*.15*(k%2+1),0);m.material.color.copy(lc(ACS,i,pe)).lerp(tmp2.set(0xffffff),k%2*.5)});
+ DUST.forEach((m,k)=>m.position.set(cx+Math.sin(t*.2+k*2.3)*8,((t*.4+k*.9)%9)-3,Math.sin(k)*3));
+}
+// ===== OVERLAY =====
+const ACC=['#ff6b6b','#4d96ff','#ffd93d','#ff6b6b','#6bcb77'],TXC=['#fff','#fff','#2b2d42','#fff','#2b2d42'];
+const LABS=[[W(2,2)-.06,"80% GAGAL"],[W(4,4)-.06,"STOP OVERTHINKING"],[W(9,4)-.06,"JUALAN=SOLUSI"],[W(11,4)-.06,"DARI TEMAN"],[W(16,0)-.06,"SAMPAI KAPAN?"]];
+const lbE=document.getElementById('lb'),lbS=lbE.firstChild,sb=document.getElementById('sb');let lastSub='\0',lastLb=-1;
+function overlay(t){
+ const i=bi(t),lb=LABS[i],out=i<4?B[i+1]-.3:END+9;
+ const s=t>=lb[0]&&t<out?eb((t-lb[0])/.35)*cl((out-t)/.25):0;
+ if(lastLb!==i){lbS.textContent=lb[1];lbS.style.background=ACC[i];lbS.style.color=TXC[i];lastLb=i}
+ lbE.style.visibility=s>.01?'visible':'hidden';lbS.style.transform='scale('+s+') rotate('+(-2+Math.sin(t*3)*1.2)+'deg)';
+ let h='';const sl=SRT.findIndex(x=>t>=x[0]&&t<x[1]);
+ if(sl>=0){const ws=LW[sl+1],cw=ws.findIndex(x=>t<x.e),c=cw<0?ws.length-1:cw,ch=[];let cur=[],n=0;
+  ws.forEach((w,k)=>{if(n+w.w.length+1>34&&cur.length){ch.push(cur);cur=[];n=0}cur.push(k);n+=w.w.length+1});ch.push(cur);
+  h=ch.find(a=>a.includes(c)).map(k=>k===c?'<span class="hl">'+ws[k].w+'</span>':ws[k].w).join(' ')}
+ if(h!==lastSub){sb.innerHTML=h;lastSub=h}
+}
+window.renderFrame=t=>{update(t);R.render(sc,cam);overlay(t)};
+const RM=location.hash==='#r';
+function layout(){const vw=innerWidth,vh=innerHeight,w=Math.min(vw,vh*9/16),h=w*16/9;
+ st.style.cssText='left:'+(vw-w)/2+'px;top:'+(vh-h)/2+'px;width:'+w+'px;height:'+h+'px;font-size:'+h/100+'px';
+ R.setPixelRatio(RM?1:Math.min(devicePixelRatio,2));R.setSize(w,h);cam.aspect=w/h;cam.setViewOffset(w,h,0,h*.2,w,h);cam.updateProjectionMatrix();
+ if(window.__t!==undefined)window.renderFrame(window.__t)}
+// ===== SFX (sintetis) =====
+// Tabel cue: [detik, efek, beat, argumen]
+const CUES=[[0,'pop',1,300],[.5,'click',1],[W(2,2)-.06,'shake',1],[W(2,2)-.06,'ting',1,1320],
+[B[1]-.55,'whoosh',1],[B[1]-.1,'pop',2,260],[B[1]+.1,'drop',2],[B[1]+.4,'drop',2],[B[1]+.7,'drop',2],[W(4,4)-.06,'ting',2,1100],
+[B[2]-.55,'whoosh',2],[B[2],'rain',3,B[3]-.5-B[2]],[B[2]+.1,'pop',3,340],[W(9,4)-.06,'pop',3,620],[W(9,4)-.04,'ting',3,1480],
+[B[3]-.55,'whoosh',3],[B[3]-.1,'pop',4,280],[B[3]+.6,'click',4],[W(11,4)-.06,'ting',4,1250],[W(13,0),'shake',4],
+[B[4]-.55,'whoosh',4],[B[4],'thud',5],[B[4]+.15,'pop',5,330],[W(15,2)-.06,'cash',5],[W(16,0)-.06,'pop',5,700],[44.2,'whoosh',5],[LASTS-.06,'ting',5,1760],[LASTS-.06,'pop',5,520]];
+function noiseBuf(c){const n=c.sampleRate*2,b=c.createBuffer(1,n,c.sampleRate),d=b.getChannelData(0);let s=12345;for(let i=0;i<n;i++){s=(s*1664525+1013904223)>>>0;d[i]=s/2147483648-1}return b}
+function env(c,o,at,dur,pk,att){const g=c.createGain();g.gain.setValueAtTime(0,at);g.gain.linearRampToValueAtTime(pk,at+(att||.005));g.gain.exponentialRampToValueAtTime(.0001,at+dur);g.connect(o);return g}
+function osc(c,o,at,ty,f0,f1,dur,pk){const x=c.createOscillator();x.type=ty;x.frequency.setValueAtTime(f0,at);x.frequency.exponentialRampToValueAtTime(f1,at+dur);x.connect(env(c,o,at,dur,pk));x.start(at);x.stop(at+dur+.05)}
+function nz(c,o,nb,at,ty,f0,f1,q,dur,pk,att){const s=c.createBufferSource();s.buffer=nb;const f=c.createBiquadFilter();f.type=ty;f.Q.value=q;f.frequency.setValueAtTime(f0,at);f.frequency.exponentialRampToValueAtTime(f1,at+dur);s.connect(f);f.connect(env(c,o,at,dur,pk,att));s.start(at,0,dur+.05)}
+const FX={whoosh:(c,o,at,nb)=>nz(c,o,nb,at,'bandpass',300,3000,1.2,.5,.5,.2),
+pop:(c,o,at,nb,f)=>osc(c,o,at,'sine',f||420,(f||420)*2.2,.1,.6),
+ting:(c,o,at,nb,f)=>osc(c,o,at,'sine',f||1320,f||1320,.6,.3),
+click:(c,o,at)=>osc(c,o,at,'square',1800,900,.04,.25),
+thud:(c,o,at)=>osc(c,o,at,'sine',110,38,.6,.7),
+shake:(c,o,at,nb)=>nz(c,o,nb,at,'bandpass',900,500,4,.35,.35,.01),
+drop:(c,o,at)=>osc(c,o,at,'sine',500,120,.25,.4),
+cash:(c,o,at)=>{osc(c,o,at,'sine',1568,1568,.4,.3);osc(c,o,at+.09,'sine',2093,2093,.5,.3)}};
+function schedSfx(c,o,from,w0){const nb=noiseBuf(c);CUES.forEach(([t,n,b,a])=>{
+ if(n==='rain'){const s=Math.max(t,from),e=t+a;if(e>s){const r=c.createBufferSource();r.buffer=nb;r.loop=true;const f=c.createBiquadFilter();f.type='highpass';f.frequency.value=2500;const g=c.createGain();g.gain.value=.05;r.connect(f);f.connect(g);g.connect(o);r.start(w0+s-from);r.stop(w0+e-from)}return}
+ if(t<from)return;FX[n](c,o,w0+t-from,nb,a)})}
+window.renderSfx=async()=>{const c=new OfflineAudioContext(1,Math.ceil(44100*DURATION),44100),m=c.createGain();m.connect(c.destination);schedSfx(c,m,0,0);
+ const r=await c.startRendering(),d=r.getChannelData(0),n=d.length,ab=new ArrayBuffer(44+n*2),v=new DataView(ab),ws=(o,s)=>[...s].forEach((ch,k)=>v.setUint8(o+k,ch.charCodeAt(0)));
+ ws(0,'RIFF');v.setUint32(4,36+n*2,true);ws(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,44100,true);v.setUint32(28,88200,true);v.setUint16(32,2,true);v.setUint16(34,16,true);ws(36,'data');v.setUint32(40,n*2,true);
+ for(let i=0;i<n;i++)v.setInt16(44+i*2,Math.max(-1,Math.min(1,d[i]))*32767,true);
+ const u=new Uint8Array(ab);let s='';for(let i=0;i<u.length;i+=8192)s+=String.fromCharCode.apply(null,u.subarray(i,i+8192));return btoa(s)};
+// ===== PEMUTAR =====
+let AC=null,buf=null,src=null,playing=false,t0=0,c0=0,cur=0,sfxG=null;
+const $=id=>document.getElementById(id),inf=$('inf'),rg=$('rg');
+const now=()=>playing?Math.min(END,t0+AC.currentTime-c0):cur;
+function play(){if(playing)return;AC=AC||new AudioContext();AC.resume();if(cur>=END-.01)cur=0;t0=cur;c0=AC.currentTime;playing=true;
+ if(buf){src=AC.createBufferSource();src.buffer=buf;src.connect(AC.destination);const p=t0-AUDIO_OFFSET;if(p>=0)src.start(0,p);else src.start(AC.currentTime-p)}
+ sfxG=AC.createGain();sfxG.gain.value=$('sx').checked?.5:0;sfxG.connect(AC.destination);schedSfx(AC,sfxG,t0,c0)}
+function pause(){if(!playing)return;cur=now();playing=false;try{src&&src.stop()}catch(e){}if(sfxG)sfxG.disconnect()}
+$('bp').onclick=play;$('bj').onclick=pause;$('sx').onchange=()=>{if(sfxG)sfxG.gain.value=$('sx').checked?.5:0};
+rg.oninput=()=>{const v=rg.value/1000*END,was=playing;pause();cur=v;if(was)play();window.__t=v;window.renderFrame(v)};
+$('fi').onchange=e=>{const f=e.target.files[0];if(!f)return;AC=AC||new AudioContext();const fr=new FileReader();fr.onload=()=>AC.decodeAudioData(fr.result,b=>{buf=b;inf.textContent='Audio '+b.duration.toFixed(1)+' dtk | animasi '+END.toFixed(1)+' dtk'},()=>inf.textContent='Audio gagal dibaca');fr.readAsArrayBuffer(f)};
+inf.textContent='Animasi '+END.toFixed(1)+' dtk';
+addEventListener('resize',layout);
+if(RM){$('ct').style.display='none'}
+window.__t=0;layout();window.renderFrame(0);
+if(!RM){(function loop(){const t=now();window.__t=t;window.renderFrame(t);rg.value=t/END*1000;if(playing&&t>=END)pause();requestAnimationFrame(loop)})()}
+/*END*/
+</script></body></html>
